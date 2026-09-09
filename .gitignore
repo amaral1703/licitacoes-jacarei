@@ -1,3 +1,4 @@
 /venv
 coleta.log
 .env
+./__pycache__/*

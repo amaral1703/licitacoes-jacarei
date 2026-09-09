@@ -3,6 +3,7 @@ Transparência Jacareí — Scraper principal
 Coleta licitações, detalhes e itens/fornecedores via API do SIAP.
 """
 
+import os
 import time
 import logging
 import re
@@ -12,17 +13,20 @@ from typing import Optional
 import requests
 import pandas as pd
 from sqlalchemy import create_engine, text
+from dotenv import load_dotenv
+
+load_dotenv()
 
 # ---------------------------------------------------------------------------
 # Config
 # ---------------------------------------------------------------------------
 
-BASE_URL = "https://siap.jacarei.sp.gov.br/portal-transparencia/api"
-DB_URL = "postgresql://postgres:1234@localhost:5432/transparencia_jacarei"
+BASE_URL = os.getenv("BASE_URL", "https://siap.jacarei.sp.gov.br/portal-transparencia/api")
+DB_URL = os.getenv("DATABASE_URL", "postgresql://postgres:1234@localhost:5432/transparencia_jacarei")
 
 ANOS = [date.today().year]                         # coleta apenas o ano atual por enquanto
-DELAY_SEGUNDOS = 0.8                               # respeito ao servidor
-MAX_RETRIES = 3
+DELAY_SEGUNDOS = float(os.getenv("SCRAPER_DELAY_SECONDS", "0.8"))
+MAX_RETRIES = int(os.getenv("SCRAPER_MAX_RETRIES", "3"))
 
 logging.basicConfig(
     level=logging.INFO,
@@ -39,7 +43,10 @@ log = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 SESSION = requests.Session()
-SESSION.headers.update({"Accept": "application/json"})
+SESSION.headers.update({
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+    "Accept": "application/json",
+})
 
 
 def _get(url: str, params: dict = None) -> Optional[dict | list]:
@@ -65,7 +72,7 @@ def buscar_licitacoes_ano(ano: int) -> list[dict]:
     """Endpoint principal — lista todas as licitações de um ano."""
     # A API espera o parâmetro de ano no formato de data que o portal envia.
     # Usamos a representação ISO mais limpa que o backend aceita.
-    url = f"{BASE_URL}//licitacoes/licitacoes/index"
+    url = f"{BASE_URL}/licitacoes/licitacoes/index"
     params = {
         "ano": f"Thu Dec 31 {ano} 00:00:00 GMT-0300 (Horário Padrão de Brasília)",
         "id_entidade": 1,
@@ -82,7 +89,7 @@ def buscar_licitacoes_ano(ano: int) -> list[dict]:
 
 def buscar_detalhes(id_processo_compra: str) -> Optional[dict]:
     """Datas de adjudicação, homologação, julgamento e abertura do processo."""
-    url = f"{BASE_URL}//sup_processo_compra"
+    url = f"{BASE_URL}/sup_processo_compra"
     dados = _get(url, params={"id_processo_compra": id_processo_compra})
     if not dados:
         return None
@@ -92,7 +99,7 @@ def buscar_detalhes(id_processo_compra: str) -> Optional[dict]:
 
 def buscar_itens(id_processo_compra: str) -> list[dict]:
     """Empresas participantes e valores vencedores por item."""
-    url = f"{BASE_URL}//sup_itens"
+    url = f"{BASE_URL}/sup_itens"
     dados = _get(url, params={"id_processo_compra": id_processo_compra})
     if isinstance(dados, list):
         return dados
@@ -101,7 +108,7 @@ def buscar_itens(id_processo_compra: str) -> list[dict]:
 
 def buscar_anexos(id_processo_compra: str) -> list[dict]:
     """Links dos editais e documentos anexos."""
-    url = f"{BASE_URL}//licitacoes/licitacoes/anexos.json"
+    url = f"{BASE_URL}/licitacoes/licitacoes/anexos.json"
     dados = _get(url, params={"id_processo_compra": id_processo_compra})
     if isinstance(dados, list):
         return dados
@@ -155,7 +162,7 @@ def transformar_licitacao(raw: dict) -> dict:
         "ds_situacao":          raw.get("ds_st_processo_compra"),
         "st_aberto":            raw.get("st_dt_abertura", False),
         "qtd_anexos":           int(raw.get("qtd_anexos") or 0),
-        "coletado_em":          datetime.utcnow(),
+        "coletado_em":          datetime.now(),
     }
 
 
