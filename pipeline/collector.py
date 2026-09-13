@@ -24,7 +24,8 @@ load_dotenv()
 BASE_URL = os.getenv("BASE_URL", "https://siap.jacarei.sp.gov.br/portal-transparencia/api")
 DB_URL = os.getenv("DATABASE_URL", "postgresql://postgres:1234@localhost:5432/transparencia_jacarei")
 
-ANOS = [date.today().year]                         # coleta apenas o ano atual por enquanto
+_ano_env = os.getenv("COLETA_ANO")
+ANOS = [int(_ano_env.strip())] if _ano_env and _ano_env.strip().isdigit() else [date.today().year]
 DELAY_SEGUNDOS = float(os.getenv("SCRAPER_DELAY_SECONDS", "0.8"))
 MAX_RETRIES = int(os.getenv("SCRAPER_MAX_RETRIES", "3"))
 

@@ -1,0 +1,82 @@
+name: Pipeline Diario de Coleta e Refresh
+
+on:
+  schedule:
+    # Executa todos os dias as 07:00 UTC (04:00 Horario de Brasilia)
+    - cron: '0 7 * * *'
+  workflow_dispatch:
+    # Permite disparar manualmente pelo painel do GitHub Actions
+    inputs:
+      ano:
+        description: 'Ano especifico para coleta (deixe vazio para o ano corrente)'
+        required: false
+        default: ''
+
+jobs:
+  coleta:
+    name: Coleta de Dados SIAP e Atualizacao Staging
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    env:
+      DATABASE_URL: ${{ secrets.DATABASE_URL }}
+      BASE_URL: ${{ secrets.BASE_URL || 'https://siap.jacarei.sp.gov.br/portal-transparencia/api' }}
+      SCRAPER_DELAY_SECONDS: '0.8'
+      SCRAPER_MAX_RETRIES: '3'
+      COLETA_ANO: ${{ github.event.inputs.ano }}
+
+    steps:
+      - name: Checkout do repositorio
+        uses: actions/checkout@v4
+
+      - name: Configurar Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+          cache-dependency-path: 'pipeline/requirements.txt'
+
+      - name: Instalar dependencias do pipeline
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r pipeline/requirements.txt
+
+      - name: Garantir schemas e tabelas no banco (DDL idempotente)
+        run: |
+          python -c "
+          import os
+          from sqlalchemy import create_engine
+          db_url = os.getenv('DATABASE_URL')
+          if not db_url:
+              raise ValueError('DATABASE_URL secret is not set')
+          engine = create_engine(db_url)
+          with open('database/01_schema.sql', 'r', encoding='utf-8') as f:
+              sql_content = f.read()
+          with engine.raw_connection() as raw_conn:
+              with raw_conn.cursor() as cur:
+                  cur.execute(sql_content)
+              raw_conn.commit()
+          print('Sucesso: Schemas raw, staging e views mart prontos no banco!')
+          "
+
+      - name: Executar coletor Python
+        run: |
+          python pipeline/collector.py
+
+      - name: Executar refresh das camadas staging e mart
+        run: |
+          python -c "
+          import os
+          from sqlalchemy import create_engine
+          db_url = os.getenv('DATABASE_URL')
+          if not db_url:
+              raise ValueError('DATABASE_URL secret is not set')
+          engine = create_engine(db_url)
+          with open('database/02_refresh_staging.sql', 'r', encoding='utf-8') as f:
+              sql_content = f.read()
+          with engine.raw_connection() as raw_conn:
+              with raw_conn.cursor() as cur:
+                  cur.execute(sql_content)
+              raw_conn.commit()
+          print('Sucesso: Staging e Mart atualizados com dados mais recentes!')
+          "
